@@ -1,0 +1,4 @@
+# arquivos de ambiente e chaves
+.env
+serviceAccountKey.json
+node_modules/

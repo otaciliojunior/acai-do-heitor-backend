@@ -19,8 +19,8 @@ const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors()); 
-app.use(express.json()); 
+app.use(cors());
+app.use(express.json());
 
 async function sendWhatsAppNotification(to, templateName, templateParams = []) {
     let formattedTo = to.replace(/\D/g, '');
@@ -96,16 +96,22 @@ app.patch('/orders/:id', async (req, res) => {
         if (!doc.exists) {
             return res.status(404).json({ error: "Pedido não encontrado." });
         }
-        const orderData = doc.data();
+        
         await orderRef.update({ status: status });
-        if (status === 'preparo') {
-            const customerName = orderData.customer.name.split(' ')[0];
-            const params = [{ type: "body", parameters: [{ type: "text", text: customerName }, { type: "text", text: orderData.orderId }] }];
-            await sendWhatsAppNotification(orderData.customer.phone, 'pedido_em_preparo', params);
-        } else if (status === 'entrega') {
-            const params = [{ type: "body", parameters: [{ type: "text", text: orderData.orderId }] }];
-            await sendWhatsAppNotification(orderData.customer.phone, 'pedido_saiu_entrega', params);
+        
+        // Notificações via WhatsApp desativadas conforme solicitado.
+        /*
+        const orderData = doc.data();
+        const customerName = (orderData.customer && orderData.customer.name) ? orderData.customer.name : orderData.customerName;
+        const customerPhone = (orderData.customer && orderData.customer.phone) ? orderData.customer.phone : orderData.customerPhone;
+
+        if (status === 'preparo' && customerName && customerPhone) {
+            const firstName = customerName.split(' ')[0];
+            const params = [{ type: "body", parameters: [{ type: "text", text: firstName }, { type: "text", text: orderData.orderId }] }];
+            await sendWhatsAppNotification(customerPhone, 'pedido_em_preparo', params);
         }
+        */
+        
         res.status(200).json({ message: `Pedido ${id} atualizado com sucesso!` });
     } catch (error) {
         res.status(500).json({ error: "Erro ao atualizar pedido." });

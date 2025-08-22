@@ -23,7 +23,7 @@ app.get('/', (req, res) => {
     res.send('API do Açaí do Heitor está funcionando!');
 });
 
-// ALTERAÇÃO: Corrigido o nome da coleção de 'orders' para 'pedidos'
+// Rota para o PAINEL DE NOTAS buscar TODOS os pedidos
 app.get('/orders', async (req, res) => {
     try {
         const ordersSnapshot = await db.collection('pedidos').orderBy('timestamp', 'desc').get();
@@ -38,7 +38,7 @@ app.get('/orders', async (req, res) => {
     }
 });
 
-// ALTERAÇÃO: Corrigido o nome da coleção de 'orders' para 'pedidos'
+// Rota para o CLIENTE buscar o status de UM pedido específico pelo ID
 app.get('/orders/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -49,17 +49,23 @@ app.get('/orders/:id', async (req, res) => {
             return res.status(404).json({ error: "Pedido não encontrado." });
         }
         
+        // ======================= INÍCIO DA ALTERAÇÃO =======================
+        // Agora, além do status e orderId, também retornamos o deliveryMode.
+        // Isso é crucial para que o site do cliente saiba qual timeline mostrar.
         res.status(200).json({
             status: doc.data().status,
-            orderId: doc.data().orderId
+            orderId: doc.data().orderId,
+            deliveryMode: doc.data().deliveryMode 
         });
+        // ======================== FIM DA ALTERAÇÃO =========================
+
     } catch (error) {
         console.error(`Erro ao buscar pedido ${req.params.id}:`, error);
         res.status(500).json({ error: "Erro ao buscar o pedido." });
     }
 });
 
-// ALTERAÇÃO: Corrigido o nome da coleção de 'orders' para 'pedidos'
+// Rota para o CLIENTE criar um novo pedido
 app.post('/orders', async (req, res) => {
     try {
         const orderData = req.body;
@@ -77,7 +83,7 @@ app.post('/orders', async (req, res) => {
     }
 });
 
-// ALTERAÇÃO: Corrigido o nome da coleção de 'orders' para 'pedidos'
+// Rota para o PAINEL DE NOTAS atualizar o status de um pedido
 app.patch('/orders/:id', async (req, res) => {
     try {
         const { id } = req.params;

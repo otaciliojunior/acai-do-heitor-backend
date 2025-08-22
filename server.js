@@ -3,7 +3,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const axios = require('axios');
 
 // --- INICIALIZAÇÃO DO FIREBASE ADMIN ---
 const serviceAccount = require('./serviceAccountKey.json');
@@ -12,65 +11,55 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-// --- CONFIGURAÇÕES DA API DA META ---
-const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
-const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-async function sendWhatsAppNotification(to, templateName, templateParams = []) {
-    let formattedTo = to.replace(/\D/g, '');
-    if (formattedTo.length === 11 && !formattedTo.startsWith('55')) {
-        formattedTo = `55${formattedTo}`;
-    }
-
-    const url = `https://graph.facebook.com/v19.0/${META_PHONE_NUMBER_ID}/messages`;
-
-    const data = {
-        messaging_product: "whatsapp",
-        to: formattedTo,
-        type: "template",
-        template: {
-            name: templateName,
-            language: { code: "pt_BR" },
-            components: templateParams
-        }
-    };
-
-    try {
-        await axios.post(url, data, {
-            headers: {
-                'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        console.log("Notificação enviada com sucesso!");
-    } catch (error) {
-        console.error("Erro ao enviar notificação do WhatsApp:", error.response ? error.response.data : error.message);
-    }
-}
+// --- ROTAS DA API ---
 
 app.get('/', (req, res) => {
     res.send('API do Açaí do Heitor está funcionando!');
 });
 
+// ALTERAÇÃO: Corrigido o nome da coleção de 'orders' para 'pedidos'
 app.get('/orders', async (req, res) => {
     try {
-        const ordersSnapshot = await db.collection('orders').orderBy('timestamp', 'desc').get();
+        const ordersSnapshot = await db.collection('pedidos').orderBy('timestamp', 'desc').get();
         const orders = [];
         ordersSnapshot.forEach(doc => {
             orders.push({ id: doc.id, data: doc.data() });
         });
         res.status(200).json(orders);
     } catch (error) {
+        console.error("Erro ao buscar todos os pedidos:", error);
         res.status(500).json({ error: "Erro ao buscar pedidos." });
     }
 });
 
+// ALTERAÇÃO: Corrigido o nome da coleção de 'orders' para 'pedidos'
+app.get('/orders/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const orderRef = db.collection('pedidos').doc(id);
+        const doc = await orderRef.get();
+
+        if (!doc.exists) {
+            return res.status(404).json({ error: "Pedido não encontrado." });
+        }
+        
+        res.status(200).json({
+            status: doc.data().status,
+            orderId: doc.data().orderId
+        });
+    } catch (error) {
+        console.error(`Erro ao buscar pedido ${req.params.id}:`, error);
+        res.status(500).json({ error: "Erro ao buscar o pedido." });
+    }
+});
+
+// ALTERAÇÃO: Corrigido o nome da coleção de 'orders' para 'pedidos'
 app.post('/orders', async (req, res) => {
     try {
         const orderData = req.body;
@@ -80,18 +69,20 @@ app.post('/orders', async (req, res) => {
             status: 'novo',
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         };
-        const docRef = await db.collection('orders').add(newOrder);
+        const docRef = await db.collection('pedidos').add(newOrder);
         res.status(201).json({ message: 'Pedido criado com sucesso!', id: docRef.id, data: newOrder });
     } catch (error) {
+        console.error("Erro ao criar pedido:", error);
         res.status(500).json({ error: "Erro ao criar pedido." });
     }
 });
 
+// ALTERAÇÃO: Corrigido o nome da coleção de 'orders' para 'pedidos'
 app.patch('/orders/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
-        const orderRef = db.collection('orders').doc(id);
+        const orderRef = db.collection('pedidos').doc(id);
         const doc = await orderRef.get();
         if (!doc.exists) {
             return res.status(404).json({ error: "Pedido não encontrado." });
@@ -99,25 +90,14 @@ app.patch('/orders/:id', async (req, res) => {
         
         await orderRef.update({ status: status });
         
-        // Notificações via WhatsApp desativadas conforme solicitado.
-        /*
-        const orderData = doc.data();
-        const customerName = (orderData.customer && orderData.customer.name) ? orderData.customer.name : orderData.customerName;
-        const customerPhone = (orderData.customer && orderData.customer.phone) ? orderData.customer.phone : orderData.customerPhone;
-
-        if (status === 'preparo' && customerName && customerPhone) {
-            const firstName = customerName.split(' ')[0];
-            const params = [{ type: "body", parameters: [{ type: "text", text: firstName }, { type: "text", text: orderData.orderId }] }];
-            await sendWhatsAppNotification(customerPhone, 'pedido_em_preparo', params);
-        }
-        */
-        
         res.status(200).json({ message: `Pedido ${id} atualizado com sucesso!` });
     } catch (error) {
+        console.error(`Erro ao atualizar pedido ${req.params.id}:`, error);
         res.status(500).json({ error: "Erro ao atualizar pedido." });
     }
 });
 
+// --- INICIALIZAÇÃO DO SERVIDOR ---
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
 });

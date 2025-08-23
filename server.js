@@ -23,22 +23,105 @@ app.get('/', (req, res) => {
     res.send('API do Açaí do Heitor está funcionando!');
 });
 
-// Rota para o PAINEL DE NOTAS buscar TODOS os pedidos
-app.get('/orders', async (req, res) => {
+// --- ALTERAÇÃO ESTRATÉGICA ---
+// Rota OTIMIZADA para o PAINEL DE NOTAS buscar apenas os pedidos ATIVOS.
+// Esta será a rota mais usada pelo painel, reduzindo drasticamente as leituras.
+app.get('/active-orders', async (req, res) => {
     try {
-        const ordersSnapshot = await db.collection('pedidos').orderBy('timestamp', 'desc').get();
+        // Usamos 'in' para buscar múltiplos status. O Firestore pode pedir um índice para isso.
+        const activeStatuses = ['novo', 'preparo', 'entrega', 'pronto_retirada'];
+        const ordersSnapshot = await db.collection('pedidos')
+                                     .where('status', 'in', activeStatuses)
+                                     .orderBy('timestamp', 'asc') // Ordena do mais antigo para o mais novo
+                                     .get();
         const orders = [];
         ordersSnapshot.forEach(doc => {
             orders.push({ id: doc.id, data: doc.data() });
         });
         res.status(200).json(orders);
     } catch (error) {
-        console.error("Erro ao buscar todos os pedidos:", error);
-        res.status(500).json({ error: "Erro ao buscar pedidos." });
+        console.error("Erro ao buscar pedidos ativos:", error);
+        res.status(500).json({ error: "Erro ao buscar pedidos ativos." });
     }
 });
 
-// Rota para o CLIENTE buscar o status de UM pedido específico pelo ID
+
+// --- NOVA ROTA ESTRATÉGICA ---
+// Rota para calcular as estatísticas do Dashboard. O painel só consome o resultado.
+app.get('/dashboard-stats', async (req, res) => {
+    try {
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        // Busca apenas os pedidos de hoje
+        const snapshot = await db.collection('pedidos')
+                                 .where('timestamp', '>=', startOfDay)
+                                 .get();
+
+        let totalRevenue = 0;
+        let totalOrdersConcluded = 0;
+        const todaysOrdersCount = snapshot.size;
+
+        snapshot.forEach(doc => {
+            const order = doc.data();
+            if (order.status === 'concluido') {
+                totalRevenue += order.totals?.total || 0;
+                totalOrdersConcluded++;
+            }
+        });
+        
+        const averageTicket = totalOrdersConcluded > 0 ? (totalRevenue / totalOrdersConcluded) : 0;
+
+        res.status(200).json({
+            totalRevenue,
+            totalOrdersConcluded,
+            averageTicket,
+            todaysOrdersCount
+        });
+    } catch (error) {
+        console.error("Erro ao calcular stats do dashboard:", error);
+        res.status(500).json({ error: "Erro ao buscar dados do dashboard." });
+    }
+});
+
+// --- NOVA ROTA ESTRATÉGICA ---
+// Rota para a funcionalidade de BUSCA. A busca é feita no servidor.
+app.get('/search', async (req, res) => {
+    try {
+        const { term } = req.query;
+        if (!term || term.trim() === '') {
+            return res.status(400).json({ error: 'Termo de busca é obrigatório.' });
+        }
+
+        const searchTerm = term.trim();
+        const promises = [];
+
+        // Busca por ID do pedido
+        promises.push(db.collection('pedidos').where('orderId', '==', searchTerm).get());
+        
+        // Busca por nome do cliente (iniciando com)
+        promises.push(db.collection('pedidos')
+                        .orderBy('customerName')
+                        .startAt(searchTerm)
+                        .endAt(searchTerm + '\uf8ff')
+                        .get());
+
+        const [byIdSnapshot, byNameSnapshot] = await Promise.all(promises);
+
+        const resultsMap = new Map();
+        byIdSnapshot.forEach(doc => resultsMap.set(doc.id, { id: doc.id, data: doc.data() }));
+        byNameSnapshot.forEach(doc => resultsMap.set(doc.id, { id: doc.id, data: doc.data() }));
+
+        const results = Array.from(resultsMap.values());
+        
+        res.status(200).json(results);
+    } catch (error) {
+        console.error("Erro na busca:", error);
+        res.status(500).json({ error: "Erro ao realizar busca." });
+    }
+});
+
+// Rota para o CLIENTE buscar o status de UM pedido específico pelo ID (sem alterações)
 app.get('/orders/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -49,15 +132,11 @@ app.get('/orders/:id', async (req, res) => {
             return res.status(404).json({ error: "Pedido não encontrado." });
         }
         
-        // ======================= INÍCIO DA ALTERAÇÃO =======================
-        // Agora, além do status e orderId, também retornamos o deliveryMode.
-        // Isso é crucial para que o site do cliente saiba qual timeline mostrar.
         res.status(200).json({
             status: doc.data().status,
             orderId: doc.data().orderId,
             deliveryMode: doc.data().deliveryMode 
         });
-        // ======================== FIM DA ALTERAÇÃO =========================
 
     } catch (error) {
         console.error(`Erro ao buscar pedido ${req.params.id}:`, error);
@@ -65,10 +144,14 @@ app.get('/orders/:id', async (req, res) => {
     }
 });
 
-// Rota para o CLIENTE criar um novo pedido
+// Rota para o CLIENTE criar um novo pedido (sem alterações)
 app.post('/orders', async (req, res) => {
     try {
         const orderData = req.body;
+        // Validação básica
+        if (!orderData || !orderData.items || orderData.items.length === 0) {
+            return res.status(400).json({ error: "Dados do pedido inválidos." });
+        }
         const newOrder = {
             ...orderData,
             orderId: Date.now().toString().slice(-6),
@@ -83,11 +166,14 @@ app.post('/orders', async (req, res) => {
     }
 });
 
-// Rota para o PAINEL DE NOTAS atualizar o status de um pedido
+// Rota para o PAINEL DE NOTAS atualizar o status de um pedido (sem alterações)
 app.patch('/orders/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
+        if (!status) {
+            return res.status(400).json({ error: "Novo status é obrigatório." });
+        }
         const orderRef = db.collection('pedidos').doc(id);
         const doc = await orderRef.get();
         if (!doc.exists) {
